@@ -1,0 +1,17 @@
+[project]
+name = "alpha-vantage-rapidapi"
+version = "0.1.0"
+description = "Alpha Vantage API wrapper optimized for RapidAPI with automatic rate limiting"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "requests",
+    "pandas",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/alpha_vantage", "src/rapidapi_utils"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
