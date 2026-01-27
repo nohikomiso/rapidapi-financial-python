@@ -230,13 +230,13 @@ class AlphaVantage(object):
             if 'json' in self.output_format.lower() or 'pandas' \
                     in self.output_format.lower():
                 if data_key is not None:
-                    data = call_response[data_key]
+                    data = call_response.get(data_key)
                 else:
                     data = call_response
                 
 
                 if meta_data_key is not None:
-                    meta_data = call_response[meta_data_key]
+                    meta_data = call_response.get(meta_data_key)
                 else:
                     meta_data = None
                 # Allow to override the output parameter in the call
@@ -348,7 +348,7 @@ class AlphaVantage(object):
         if 'json' in self.output_format.lower() or 'pandas' in \
                 self.output_format.lower():
             json_response = response.json()
-            if not json_response:
+            if json_response is None:
                 raise ValueError(
                     'Error getting data from the api, no return was given.')
             elif "Error Message" in json_response:
