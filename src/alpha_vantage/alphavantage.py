@@ -356,10 +356,11 @@ class AlphaVantage(object):
             elif "message" in json_response:
                 # RapidAPI specific error message
                 msg = json_response["message"]
-                if self.rapidapi and self.rate_limiter and "rate limit" in msg.lower():
-                    # If it's a rate limit error in body, treat as 429 for backoff
-                    self.rate_limiter.update_from_headers(response.headers, status_code=429)
-                raise ValueError(msg)
+                if msg.lower() != "success":
+                    if self.rapidapi and self.rate_limiter and "rate limit" in msg.lower():
+                        # If it's a rate limit error in body, treat as 429 for backoff
+                        self.rate_limiter.update_from_headers(response.headers, status_code=429)
+                    raise ValueError(msg)
             elif "Information" in json_response and self.treat_info_as_error:
                 raise ValueError(json_response["Information"])
             elif "Note" in json_response and self.treat_info_as_error:
