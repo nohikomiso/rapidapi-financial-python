@@ -330,45 +330,62 @@ class AlphaVantage(object):
     def _handle_api_call(self, url):
         """ Handle the return call from the  api and return a data and meta_data
         object. It raises a ValueError on problems
-
-        Keyword Arguments:
-            url:  The url of the service
-            data_key:  The key for getting the data from the jso object
-            meta_data_key:  The key for getting the meta data information out
-            of the json object
         """
-        if self.rapidapi and self.rate_limiter:
-            self.rate_limiter.wait_before_request()
+        max_retries = 3
+        retries = 0
+        while retries <= max_retries:
+            if self.rapidapi and self.rate_limiter:
+                self.rate_limiter.wait_before_request()
 
-        response = requests.get(url, proxies=self.proxy, headers=self.headers)
+            response = requests.get(url, proxies=self.proxy, headers=self.headers)
+            backoff_occured = False
 
-        if self.rapidapi and self.rate_limiter:
-            self.rate_limiter.update_from_headers(response.headers, status_code=response.status_code)
+            if self.rapidapi and self.rate_limiter:
+                # Update limiter and check if it handled a 429/quota-exceeded sleep
+                backoff_occured = self.rate_limiter.update_from_headers(response.headers, status_code=response.status_code)
 
-        if 'json' in self.output_format.lower() or 'pandas' in \
-                self.output_format.lower():
-            json_response = response.json()
-            if json_response is None:
-                raise ValueError(
-                    'Error getting data from the api, no return was given.')
-            elif "Error Message" in json_response:
-                raise ValueError(json_response["Error Message"])
-            elif "message" in json_response:
-                # RapidAPI specific error message
-                msg = json_response["message"]
-                if msg.lower() != "success":
-                    if self.rapidapi and self.rate_limiter and "rate limit" in msg.lower():
-                        # If it's a rate limit error in body, treat as 429 for backoff
+            if 'json' in self.output_format.lower() or 'pandas' in \
+                    self.output_format.lower():
+                try:
+                    json_response = response.json()
+                except ValueError:
+                    raise ValueError('Error getting data from the api, invalid JSON was returned.')
+
+                if json_response is None:
+                    raise ValueError(
+                        'Error getting data from the api, no return was given.')
+                
+                # Check for error/info messages in body
+                error_msg = None
+                if "Error Message" in json_response:
+                    error_msg = json_response["Error Message"]
+                elif "message" in json_response:
+                    msg = json_response["message"]
+                    if msg.lower() != "success":
+                        error_msg = msg
+                elif "Information" in json_response and self.treat_info_as_error:
+                    error_msg = json_response["Information"]
+                elif "Note" in json_response and self.treat_info_as_error:
+                    error_msg = json_response["Note"]
+
+                if error_msg:
+                    # If it's a rate limit error in body AND we haven't slept yet
+                    if self.rapidapi and self.rate_limiter and "rate limit" in error_msg.lower() and not backoff_occured:
                         self.rate_limiter.update_from_headers(response.headers, status_code=429)
-                    raise ValueError(msg)
-            elif "Information" in json_response and self.treat_info_as_error:
-                raise ValueError(json_response["Information"])
-            elif "Note" in json_response and self.treat_info_as_error:
-                raise ValueError(json_response["Note"])
-            return json_response
-        else:
-            csv_response = csv.reader(response.text.splitlines())
-            if not csv_response:
-                raise ValueError(
-                    'Error getting data from the api, no return was given.')
-            return csv_response
+                        retries += 1
+                        continue
+                    elif "rate limit" in error_msg.lower():
+                        # Already backed off once, just retry
+                        retries += 1
+                        continue
+                    raise ValueError(error_msg)
+                
+                return json_response
+            else:
+                csv_response = csv.reader(response.text.splitlines())
+                if not csv_response:
+                    raise ValueError(
+                        'Error getting data from the api, no return was given.')
+                return csv_response
+        
+        raise ValueError(f"Failed after {max_retries} retries due to rate limits or errors.")

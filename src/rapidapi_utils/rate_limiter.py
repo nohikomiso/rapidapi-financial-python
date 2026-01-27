@@ -9,13 +9,13 @@ class RapidAPIRateLimiter:
     """
     RapidAPIの共通ヘッダーとスライディング・ウィンドウ方式を組み合わせたレート制限管理クラス。
     """
-    def __init__(self, max_requests_per_window=5, window_seconds=60, min_interval=12):
+    def __init__(self, max_requests_per_window=5, window_seconds=60, min_interval=13):
         self.max_requests_per_window = max_requests_per_window
         self.window_seconds = window_seconds
         self.min_interval = min_interval
         self.request_times = deque()
         self.last_request_time = None
-        self.safety_margin = 2  # 秒
+        self.safety_margin = 5  # 秒
 
     def wait_before_request(self):
         """リクエストを送信する前に、制限に達していないか確認し必要に応じて待機する"""
@@ -51,13 +51,14 @@ class RapidAPIRateLimiter:
     def update_from_headers(self, headers, status_code=200):
         """
         レスポンスヘッダーとステータスコードから最新の制限情報を取得し、必要に応じて待機する。
+        バックオフ待機が発生した場合は True を返す。
         """
         if status_code == 429:
             wait_time = 65
             logger.warning(f"Status 429 detected. Backing off for {wait_time}s...")
             time.sleep(wait_time)
             self.request_times.clear()
-            return
+            return True
 
         remaining = headers.get('x-ratelimit-requests-remaining')
         reset = headers.get('x-ratelimit-requests-reset')
@@ -71,3 +72,5 @@ class RapidAPIRateLimiter:
                 time.sleep(wait_seconds)
                 # 待機後はスライディングウィンドウをクリアしてリフレッシュ
                 self.request_times.clear()
+                return True
+        return False
