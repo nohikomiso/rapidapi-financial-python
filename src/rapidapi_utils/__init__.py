@@ -1,3 +1,3 @@
-from .rate_limiter import RapidAPIRateLimiter
+from .rate_limiter import RapidAPIRateLimiter, DailyQuotaExhausted
 
-__all__ = ["RapidAPIRateLimiter"]
+__all__ = ["RapidAPIRateLimiter", "DailyQuotaExhausted"]

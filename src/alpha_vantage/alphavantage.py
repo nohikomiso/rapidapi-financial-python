@@ -4,36 +4,62 @@ from functools import wraps
 import inspect
 import sys
 import re
+
 # Pandas became an optional dependency, but we still want to track it
 try:
     import pandas
+
     _PANDAS_FOUND = True
 except ImportError:
     _PANDAS_FOUND = False
 import csv
+
 try:
     from rapidapi_utils import RapidAPIRateLimiter, DailyQuotaExhausted
+
     _RAPIDAPI_UTILS_FOUND = True
 except ImportError:
     _RAPIDAPI_UTILS_FOUND = False
 
+    class DailyQuotaExhausted(Exception):  # type: ignore[no-redef]
+        """1日のAPIクォータ（上限）を使い切った際に投げられる例外（フォールバック）"""
+        pass
+
 
 class AlphaVantage(object):
-    """ Base class where the decorators and base function for the other
+    """Base class where the decorators and base function for the other
     classes of this python wrapper will inherit from.
     """
+
     _ALPHA_VANTAGE_API_URL = "https://www.alphavantage.co/query?"
-    _ALPHA_VANTAGE_MATH_MAP = ['SMA', 'EMA', 'WMA', 'DEMA', 'TEMA', 'TRIMA',
-                               'T3', 'KAMA', 'MAMA']
-    _ALPHA_VANTAGE_DIGITAL_CURRENCY_LIST = \
+    _ALPHA_VANTAGE_MATH_MAP = [
+        "SMA",
+        "EMA",
+        "WMA",
+        "DEMA",
+        "TEMA",
+        "TRIMA",
+        "T3",
+        "KAMA",
+        "MAMA",
+    ]
+    _ALPHA_VANTAGE_DIGITAL_CURRENCY_LIST = (
         "https://www.alphavantage.co/digital_currency_list/"
+    )
 
     _RAPIDAPI_URL = "https://alpha-vantage.p.rapidapi.com/query?"
 
-    def __init__(self, key=None, output_format='json',
-                 treat_info_as_error=True, indexing_type='date',
-                 proxy=None, rapidapi=False, wait_on_quota_exhausted=True):
-        """ Initialize the class
+    def __init__(
+        self,
+        key=None,
+        output_format="json",
+        treat_info_as_error=True,
+        indexing_type="date",
+        proxy=None,
+        rapidapi=False,
+        wait_on_quota_exhausted=True,
+    ):
+        """Initialize the class
 
         Keyword Arguments:
             key:  Alpha Vantage api key
@@ -51,27 +77,31 @@ class AlphaVantage(object):
             through the RapidAPI platform or not
         """
         if key is None:
-            key = os.getenv('ALPHAVANTAGE_API_KEY')
+            key = os.getenv("ALPHAVANTAGE_API_KEY")
         if not key or not isinstance(key, str):
-            raise ValueError('The AlphaVantage API key must be provided '
-                             'either through the key parameter or '
-                             'through the environment variable '
-                             'ALPHAVANTAGE_API_KEY. Get a free key '
-                             'from the alphavantage website: '
-                             'https://www.alphavantage.co/support/#api-key')
+            raise ValueError(
+                "The AlphaVantage API key must be provided "
+                "either through the key parameter or "
+                "through the environment variable "
+                "ALPHAVANTAGE_API_KEY. Get a free key "
+                "from the alphavantage website: "
+                "https://www.alphavantage.co/support/#api-key"
+            )
         self.headers = {}
         if rapidapi:
             self.headers = {
-                'x-rapidapi-host': "alpha-vantage.p.rapidapi.com",
-                'x-rapidapi-key': key
+                "x-rapidapi-host": "alpha-vantage.p.rapidapi.com",
+                "x-rapidapi-key": key,
             }
         self.rapidapi = rapidapi
         self.key = key
         self.output_format = output_format
-        if self.output_format == 'pandas' and not _PANDAS_FOUND:
-            raise ValueError("The pandas library was not found, therefore can "
-                             "not be used as an output format, please install "
-                             "manually")
+        if self.output_format == "pandas" and not _PANDAS_FOUND:
+            raise ValueError(
+                "The pandas library was not found, therefore can "
+                "not be used as an output format, please install "
+                "manually"
+            )
         self.treat_info_as_error = treat_info_as_error
         # Not all the calls accept a data type appended at the end, this
         # variable will be overridden by those functions not needing it.
@@ -80,13 +110,18 @@ class AlphaVantage(object):
         self.proxy = proxy or {}
         if _RAPIDAPI_UTILS_FOUND:
             # 5 requests per 60 seconds (Alpha Vantage default on RapidAPI)
-            self.rate_limiter = RapidAPIRateLimiter(max_requests_per_window=5, window_seconds=60, min_interval=13, wait_on_quota_exhausted=wait_on_quota_exhausted)
+            self.rate_limiter = RapidAPIRateLimiter(
+                max_requests_per_window=5,
+                window_seconds=60,
+                min_interval=13,
+                wait_on_quota_exhausted=wait_on_quota_exhausted,
+            )
         else:
             self.rate_limiter = None
 
     @classmethod
     def _call_api_on_func(cls, func):
-        """ Decorator for forming the api call with the arguments of the
+        """Decorator for forming the api call with the arguments of the
         function, it works by taking the arguments given to the function
         and building the url to call the api on it
 
@@ -104,8 +139,7 @@ class AlphaVantage(object):
             # Assume most of the cases have a mixed between args and named
             # args
             positional_count = len(argspec.args) - len(argspec.defaults)
-            defaults = dict(
-                zip(argspec.args[positional_count:], argspec.defaults))
+            defaults = dict(zip(argspec.args[positional_count:], argspec.defaults))
         except TypeError:
             if argspec.args:
                 # No defaults
@@ -121,25 +155,28 @@ class AlphaVantage(object):
         def _call_wrapper(self, *args, **kwargs):
             used_kwargs = kwargs.copy()
             # Get the used positional arguments given to the function
-            used_kwargs.update(zip(argspec.args[positional_count:],
-                                   args[positional_count:]))
+            used_kwargs.update(
+                zip(argspec.args[positional_count:], args[positional_count:])
+            )
             # Update the dictionary to include the default parameters from the
             # function
-            used_kwargs.update({k: used_kwargs.get(k, d)
-                                for k, d in defaults.items()})
+            used_kwargs.update({k: used_kwargs.get(k, d) for k, d in defaults.items()})
             # Form the base url, the original function called must return
             # the function name defined in the alpha vantage api and the data
             # key for it and for its meta data.
-            function_name, data_key, meta_data_key = func(
-                self, *args, **kwargs)
-            base_url = AlphaVantage._RAPIDAPI_URL if self.rapidapi else AlphaVantage._ALPHA_VANTAGE_API_URL
+            function_name, data_key, meta_data_key = func(self, *args, **kwargs)
+            base_url = (
+                AlphaVantage._RAPIDAPI_URL
+                if self.rapidapi
+                else AlphaVantage._ALPHA_VANTAGE_API_URL
+            )
             url = "{}function={}".format(base_url, function_name)
             for idx, arg_name in enumerate(argspec.args[1:]):
                 try:
                     arg_value = args[idx]
                 except IndexError:
                     arg_value = used_kwargs[arg_name]
-                if 'matype' in arg_name and arg_value:
+                if "matype" in arg_name and arg_value:
                     # If the argument name has matype, we gotta map the string
                     # or the integer
                     arg_value = self.map_to_matype(arg_value)
@@ -150,30 +187,34 @@ class AlphaVantage(object):
                     if isinstance(arg_value, tuple) or isinstance(arg_value, list):
                         # If the argument is given as list, then we have to
                         # format it, you gotta format it nicely
-                        arg_value = ','.join(arg_value)
-                    url = '{}&{}={}'.format(url, arg_name, arg_value)
+                        arg_value = ",".join(arg_value)
+                    url = "{}&{}={}".format(url, arg_name, arg_value)
             # Allow the output format to be json or csv (supported by
             # alphavantage api). Pandas is simply json converted.
-            if 'json' in self.output_format.lower() or 'csv' in self.output_format.lower():
+            if (
+                "json" in self.output_format.lower()
+                or "csv" in self.output_format.lower()
+            ):
                 oformat = self.output_format.lower()
-            elif 'pandas' in self.output_format.lower():
-                oformat = 'json'
+            elif "pandas" in self.output_format.lower():
+                oformat = "json"
             else:
-                raise ValueError("Output format: {} not recognized, only json,"
-                                 "pandas and csv are supported".format(
-                                     self.output_format.lower()))
-            apikey_parameter = "" if self.rapidapi else "&apikey={}".format(
-                self.key)
+                raise ValueError(
+                    "Output format: {} not recognized, only json,"
+                    "pandas and csv are supported".format(self.output_format.lower())
+                )
+            apikey_parameter = "" if self.rapidapi else "&apikey={}".format(self.key)
             if self._append_type:
-                url = '{}{}&datatype={}'.format(url, apikey_parameter, oformat)
+                url = "{}{}&datatype={}".format(url, apikey_parameter, oformat)
             else:
-                url = '{}{}'.format(url, apikey_parameter)
+                url = "{}{}".format(url, apikey_parameter)
             return self._handle_api_call(url), data_key, meta_data_key
+
         return _call_wrapper
 
     @classmethod
     def _output_format_sector(cls, func, override=None):
-        """ Decorator in charge of giving the output its right format, either
+        """Decorator in charge of giving the output its right format, either
         json or pandas (replacing the % for usable floats, range 0-1.0)
 
         Keyword Arguments:
@@ -182,14 +223,19 @@ class AlphaVantage(object):
         Returns:
             A decorator for the format sector api call
         """
+
         @wraps(func)
         def _format_wrapper(self, *args, **kwargs):
-            json_response, data_key, meta_data_key = func(
-                self, *args, **kwargs)
+            json_response, data_key, meta_data_key = func(self, *args, **kwargs)
             if isinstance(data_key, list):
                 # Replace the strings into percentage
-                data = {key: {k: self.percentage_to_float(v)
-                              for k, v in json_response[key].items()} for key in data_key}
+                data = {
+                    key: {
+                        k: self.percentage_to_float(v)
+                        for k, v in json_response[key].items()
+                    }
+                    for key in data_key
+                }
             else:
                 data = json_response[data_key]
             # TODO: Fix orientation in a better way
@@ -197,44 +243,47 @@ class AlphaVantage(object):
             # Allow to override the output parameter in the call
             if override is None:
                 output_format = self.output_format.lower()
-            elif 'json' or 'pandas' in override.lower():
+            elif "json" or "pandas" in override.lower():
                 output_format = override.lower()
             # Choose output format
-            if output_format == 'json':
+            if output_format == "json":
                 return data, meta_data
-            elif output_format == 'pandas':
-                data_pandas = pandas.DataFrame.from_dict(data,
-                                                         orient='columns')
+            elif output_format == "pandas":
+                data_pandas = pandas.DataFrame.from_dict(data, orient="columns")
                 # Rename columns to have a nicer name
-                col_names = [re.sub(r'\d+.', '', name).strip(' ')
-                             for name in list(data_pandas)]
+                col_names = [
+                    re.sub(r"\d+.", "", name).strip(" ") for name in list(data_pandas)
+                ]
                 data_pandas.columns = col_names
                 return data_pandas, meta_data
             else:
-                raise ValueError('Format: {} is not supported'.format(
-                    self.output_format))
+                raise ValueError(
+                    "Format: {} is not supported".format(self.output_format)
+                )
+
         return _format_wrapper
 
     @classmethod
     def _output_format(cls, func, override=None):
-        """ Decorator in charge of giving the output its right format, either
+        """Decorator in charge of giving the output its right format, either
         json or pandas
 
         Keyword Arguments:
             func:  The function to be decorated
             override:  Override the internal format of the call, default None
         """
+
         @wraps(func)
         def _format_wrapper(self, *args, **kwargs):
-            call_response, data_key, meta_data_key = func(
-                self, *args, **kwargs)
-            if 'json' in self.output_format.lower() or 'pandas' \
-                    in self.output_format.lower():
+            call_response, data_key, meta_data_key = func(self, *args, **kwargs)
+            if (
+                "json" in self.output_format.lower()
+                or "pandas" in self.output_format.lower()
+            ):
                 if data_key is not None:
                     data = call_response.get(data_key)
                 else:
                     data = call_response
-                
 
                 if meta_data_key is not None:
                     meta_data = call_response.get(meta_data_key)
@@ -243,12 +292,12 @@ class AlphaVantage(object):
                 # Allow to override the output parameter in the call
                 if override is None:
                     output_format = self.output_format.lower()
-                elif 'json' or 'pandas' in override.lower():
+                elif "json" or "pandas" in override.lower():
                     output_format = override.lower()
                 # Choose output format
-                if output_format == 'json':
+                if output_format == "json":
                     return data, meta_data
-                elif output_format == 'pandas':
+                elif output_format == "pandas":
                     if isinstance(data, list):
                         # If the call returns a list, then we will append them
                         # in the resulting data frame.
@@ -258,40 +307,42 @@ class AlphaVantage(object):
                             data_array = []
                             for val in data:
                                 data_array.append([v for _, v in val.items()])
-                            data_pandas = pandas.DataFrame(data_array, columns=[
-                                k for k, _ in data[0].items()])
+                            data_pandas = pandas.DataFrame(
+                                data_array, columns=[k for k, _ in data[0].items()]
+                            )
                     else:
                         try:
-                            data_pandas = pandas.DataFrame.from_dict(data,
-                                                                     orient='index',
-                                                                     dtype='float')
+                            data_pandas = pandas.DataFrame.from_dict(
+                                data, orient="index", dtype="float"
+                            )
                         except ValueError:
                             data = {data_key: data}
-                            data_pandas = pandas.DataFrame.from_dict(data,
-                                                                     orient='index',
-                                                                     dtype='object')
+                            data_pandas = pandas.DataFrame.from_dict(
+                                data, orient="index", dtype="object"
+                            )
                             return data_pandas, meta_data
 
-                    if 'integer' in self.indexing_type:
+                    if "integer" in self.indexing_type:
                         # Set Date as an actual column so a new numerical index
                         # will be created, but only when specified by the user.
                         data_pandas.reset_index(level=0, inplace=True)
-                        data_pandas.index.name = 'index'
+                        data_pandas.index.name = "index"
                     else:
-                        data_pandas.index.name = 'date'
+                        data_pandas.index.name = "date"
                         # convert to pandas._libs.tslibs.timestamps.Timestamp
-                        data_pandas.index = pandas.to_datetime(
-                            data_pandas.index)
+                        data_pandas.index = pandas.to_datetime(data_pandas.index)
                     return data_pandas, meta_data
-            elif 'csv' in self.output_format.lower():
+            elif "csv" in self.output_format.lower():
                 return call_response, None
             else:
-                raise ValueError('Format: {} is not supported'.format(
-                    self.output_format))
+                raise ValueError(
+                    "Format: {} is not supported".format(self.output_format)
+                )
+
         return _format_wrapper
 
     def set_proxy(self, proxy=None):
-        """ Set a new proxy configuration
+        """Set a new proxy configuration
 
         Keyword Arguments:
             proxy: Dictionary mapping protocol or protocol and hostname to
@@ -300,7 +351,7 @@ class AlphaVantage(object):
         self.proxy = proxy or {}
 
     def map_to_matype(self, matype):
-        """ Convert to the alpha vantage math type integer. It returns an
+        """Convert to the alpha vantage math type integer. It returns an
         integer correspondent to the type of math to apply to a function. It
         raises ValueError if an integer greater than the supported math types
         is given.
@@ -329,7 +380,7 @@ class AlphaVantage(object):
         return value
 
     def _handle_api_call(self, url):
-        """ Handle the return call from the  api and return a data and meta_data
+        """Handle the return call from the  api and return a data and meta_data
         object. It raises a ValueError on problems
         """
         max_retries = 3
@@ -343,19 +394,26 @@ class AlphaVantage(object):
 
             if self.rapidapi and self.rate_limiter:
                 # Update limiter and check if it handled a 429/quota-exceeded sleep
-                backoff_occured = self.rate_limiter.update_from_headers(response.headers, status_code=response.status_code)
+                backoff_occured = self.rate_limiter.update_from_headers(
+                    response.headers, status_code=response.status_code
+                )
 
-            if 'json' in self.output_format.lower() or 'pandas' in \
-                    self.output_format.lower():
+            if (
+                "json" in self.output_format.lower()
+                or "pandas" in self.output_format.lower()
+            ):
                 try:
                     json_response = response.json()
                 except ValueError:
-                    raise ValueError('Error getting data from the api, invalid JSON was returned.')
+                    raise ValueError(
+                        "Error getting data from the api, invalid JSON was returned."
+                    )
 
                 if json_response is None:
                     raise ValueError(
-                        'Error getting data from the api, no return was given.')
-                
+                        "Error getting data from the api, no return was given."
+                    )
+
                 # Check for error/info messages in body
                 error_msg = None
                 if "Error Message" in json_response:
@@ -370,10 +428,19 @@ class AlphaVantage(object):
                     error_msg = json_response["Note"]
 
                 if error_msg:
-                    is_rate_limit = any(s in error_msg.lower() for s in ["rate limit", "burst pattern"])
+                    is_rate_limit = any(
+                        s in error_msg.lower() for s in ["rate limit", "burst pattern"]
+                    )
                     # If it's a rate limit error in body AND we haven't slept yet
-                    if self.rapidapi and self.rate_limiter and is_rate_limit and not backoff_occured:
-                        self.rate_limiter.update_from_headers(response.headers, status_code=429)
+                    if (
+                        self.rapidapi
+                        and self.rate_limiter
+                        and is_rate_limit
+                        and not backoff_occured
+                    ):
+                        self.rate_limiter.update_from_headers(
+                            response.headers, status_code=429
+                        )
                         retries += 1
                         continue
                     elif is_rate_limit:
@@ -381,13 +448,16 @@ class AlphaVantage(object):
                         retries += 1
                         continue
                     raise ValueError(error_msg)
-                
+
                 return json_response
             else:
                 csv_response = csv.reader(response.text.splitlines())
                 if not csv_response:
                     raise ValueError(
-                        'Error getting data from the api, no return was given.')
+                        "Error getting data from the api, no return was given."
+                    )
                 return csv_response
-        
-        raise ValueError(f"Failed after {max_retries} retries due to rate limits or errors.")
+
+        raise ValueError(
+            f"Failed after {max_retries} retries due to rate limits or errors."
+        )
