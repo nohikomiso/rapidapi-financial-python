@@ -12,7 +12,7 @@ except ImportError:
     _PANDAS_FOUND = False
 import csv
 try:
-    from rapidapi_utils import RapidAPIRateLimiter
+    from rapidapi_utils import RapidAPIRateLimiter, DailyQuotaExhausted
     _RAPIDAPI_UTILS_FOUND = True
 except ImportError:
     _RAPIDAPI_UTILS_FOUND = False
@@ -31,7 +31,8 @@ class AlphaVantage(object):
     _RAPIDAPI_URL = "https://alpha-vantage.p.rapidapi.com/query?"
 
     def __init__(self, key=None, output_format='json',
-                 treat_info_as_error=True, indexing_type='date', proxy=None, rapidapi=False):
+                 treat_info_as_error=True, indexing_type='date',
+                 proxy=None, rapidapi=False, wait_on_quota_exhausted=True):
         """ Initialize the class
 
         Keyword Arguments:
@@ -79,7 +80,7 @@ class AlphaVantage(object):
         self.proxy = proxy or {}
         if _RAPIDAPI_UTILS_FOUND:
             # 5 requests per 60 seconds (Alpha Vantage default on RapidAPI)
-            self.rate_limiter = RapidAPIRateLimiter(max_requests_per_window=5, window_seconds=60, min_interval=12)
+            self.rate_limiter = RapidAPIRateLimiter(max_requests_per_window=5, window_seconds=60, min_interval=13, wait_on_quota_exhausted=wait_on_quota_exhausted)
         else:
             self.rate_limiter = None
 
@@ -369,12 +370,13 @@ class AlphaVantage(object):
                     error_msg = json_response["Note"]
 
                 if error_msg:
+                    is_rate_limit = any(s in error_msg.lower() for s in ["rate limit", "burst pattern"])
                     # If it's a rate limit error in body AND we haven't slept yet
-                    if self.rapidapi and self.rate_limiter and "rate limit" in error_msg.lower() and not backoff_occured:
+                    if self.rapidapi and self.rate_limiter and is_rate_limit and not backoff_occured:
                         self.rate_limiter.update_from_headers(response.headers, status_code=429)
                         retries += 1
                         continue
-                    elif "rate limit" in error_msg.lower():
+                    elif is_rate_limit:
                         # Already backed off once, just retry
                         retries += 1
                         continue
