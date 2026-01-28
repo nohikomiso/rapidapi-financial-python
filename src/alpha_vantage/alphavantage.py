@@ -23,6 +23,7 @@ except ImportError:
 
     class DailyQuotaExhausted(Exception):  # type: ignore[no-redef]
         """1日のAPIクォータ（上限）を使い切った際に投げられる例外（フォールバック）"""
+
         pass
 
 
