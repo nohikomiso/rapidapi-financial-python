@@ -12,8 +12,10 @@
 ## 🌟 主な特徴
 
 - **レート制限への自動適応**: `X-RateLimit-*` ヘッダーをリアルタイムに監視し、プロバイダーの制限を遵守しながら効率的にリクエスト。
-- **インテリジェント・バックオフ**: 429 エラーやボディ内の警告を検知すると、API プロバイダーへの過負荷を避けるため自動で安全に待機。
+- **インテリジェント・バックオフ**: 429 エラーやボディ内の警告（`Burst pattern detected`等）を検知すると、API プロバイダーへの過負荷を避けるため自動で安全に待機・リトライ。
+- **バースト検知回避 (Jitter)**: リクエスト間隔にランダムなゆらぎを加えることで、機械的な等間隔パターンを排除し、プロバイダー側のセキュリティフィルタ通過率を向上。
 - **スライディング・ウィンドウ制御**: クライアント側でもリクエスト間隔を調整し、API サーバーに負荷をかけない均等分散を実現。
+- **クォータ（1日上限）管理**: 24時間の上限に達した際、正確な回復時刻を算出し、待機するか例外を投げて終了するかを選択可能。
 - **シンプルなシングルパッケージ**: 複雑なサブディレクトリ指定なしで、直ちにプロジェクトへ導入可能。
 
 ---
@@ -45,7 +47,8 @@ uv add "git+https://github.com/nohikomiso/rapidapi-financial-python.git"
 from alpha_vantage.fundamentaldata import FundamentalData
 
 # ライブラリが裏側で自動的に待機と制限管理を行います
-fd = FundamentalData(key='YOUR_RAPIDAPI_KEY', rapidapi=True)
+# wait_on_quota_exhausted=False にすると、1日の上限到達時にスリープせず例外を投げます
+fd = FundamentalData(key='YOUR_RAPIDAPI_KEY', rapidapi=True, wait_on_quota_exhausted=True)
 data, meta_data = fd.get_earnings_quarterly('AAPL')
 
 print(data)
